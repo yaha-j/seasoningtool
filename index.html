@@ -1,0 +1,238 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>調味料計算ツール</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      max-width: 640px;
+      margin: 2em auto;
+      padding: 1em;
+      font-family: 'Helvetica Neue', sans-serif;
+      background-color: #fefefe;
+    }
+    .slider-value {
+      width: 3em;
+      text-align: right;
+    }
+    .seasoning-group {
+      border: 1px solid #ccc;
+      padding: 1em;
+      margin-bottom: 1em;
+      border-radius: 8px;
+      background: #f9f9f9;
+    }
+    .slider-container {
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
+      margin-top: 0.5em;
+    }
+    .slider-container input[type=range] {
+      flex: 1;
+    }
+    #result {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      padding: 1em;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 class="mb-3">調味料計算ツール</h2>
+    <p>食材の重量と希望する塩分濃度から、調味料の配合量を自動計算します。日々の料理に役立ててください。</p>
+
+    <div class="mb-3">
+      <label for="total-weight" class="form-label">食材の合計重量 (g)</label>
+      <input type="number" id="total-weight" class="form-control" min="1" value="800" />
+    </div>
+
+    <fieldset class="mb-4">
+      <legend class="col-form-label">塩分濃度を選択</legend>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="salt-level" value="0.006" id="salt1">
+        <label class="form-check-label" for="salt1">薄め (0.6%)</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="salt-level" value="0.008" id="salt2" checked>
+        <label class="form-check-label" for="salt2">標準 (0.8%)</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="salt-level" value="0.01" id="salt3">
+        <label class="form-check-label" for="salt3">濃いめ (1.0%)</label>
+      </div>
+    </fieldset>
+
+    <h4 class="mb-3">調味料を選んで比率を調整（合計 = 10）</h4>
+    <div id="seasoning-container"></div>
+
+    <div class="my-4">
+      <button id="calc-btn" class="btn btn-primary me-2">計算する</button>
+      <button id="reset-btn" class="btn btn-secondary">リセット</button>
+    </div>
+
+    <div id="result" aria-live="polite"></div>
+  </div>
+
+  <script>
+    const seasonings = {
+      '塩': 1.0, '雪塩/粟国の塩': 0.8, 'しょうゆ': 0.16, 'めんつゆ': 0.15, 'みそ': 0.12,
+      '白だし': 0.13, 'コンソメ': 0.48, '鶏ガラスープの素': 0.5, 'ほんだし': 0.5, 'ウェイパー': 0.5,
+      'オイスターソース': 0.08, '焼肉のたれ': 0.07, '中濃ソース': 0.05, 'ウスターソース': 0.06,
+      'ナンプラー': 0.25, '豆板醤': 0.10, '甜麺醤': 0.08, 'コチュジャン': 0.07, 'XO醤': 0.06, '豆鼓醤': 0.09
+    };
+
+    const container = document.getElementById('seasoning-container');
+    const resultDiv = document.getElementById('result');
+    let selectedSeasonings = [];
+    let sliders = [];
+
+    function createSeasoningSelector(index) {
+      const groupDiv = document.createElement('div');
+      groupDiv.className = 'seasoning-group';
+
+      const select = document.createElement('select');
+      select.className = 'form-select';
+      select.innerHTML = `<option value="">--- 調味料を選んでください ---</option>`;
+      for (const name in seasonings) {
+        if (!selectedSeasonings.includes(name)) {
+          const option = document.createElement('option');
+          option.value = name;
+          option.textContent = name;
+          select.appendChild(option);
+        }
+      }
+
+      const sliderContainer = document.createElement('div');
+      sliderContainer.className = 'slider-container';
+      sliderContainer.style.display = 'none';
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.className = 'form-range';
+      slider.min = 0;
+      slider.max = 10;
+      slider.value = 5;
+      slider.step = 0.1;
+
+      const sliderValue = document.createElement('span');
+      sliderValue.className = 'slider-value';
+      sliderValue.textContent = slider.value;
+
+      sliderContainer.appendChild(slider);
+      sliderContainer.appendChild(sliderValue);
+      groupDiv.appendChild(select);
+      groupDiv.appendChild(sliderContainer);
+      container.appendChild(groupDiv);
+
+      select.addEventListener('change', () => {
+        const selected = select.value;
+        if (selected) {
+          selectedSeasonings.push(selected);
+          sliderContainer.style.display = 'flex';
+          sliders.push({ name: selected, slider, display: sliderValue });
+          updateAllSliderValues();
+          createSeasoningSelector(index + 1);
+        }
+      });
+
+      slider.addEventListener('input', () => {
+        adjustRatios(slider);
+        updateSliderDisplays();
+      });
+    }
+
+    function adjustRatios(changedSlider) {
+      const total = sliders.reduce((sum, s) => sum + parseFloat(s.slider.value), 0);
+      const excess = total - 10;
+      if (Math.abs(excess) < 0.01) return;
+      const others = sliders.filter(s => s.slider !== changedSlider);
+      const adjustableTotal = others.reduce((sum, s) => sum + parseFloat(s.slider.value), 0);
+      for (const s of others) {
+        const current = parseFloat(s.slider.value);
+        if (adjustableTotal === 0) {
+          s.slider.value = (10 / others.length).toFixed(2);
+        } else {
+          const adjustment = (current / adjustableTotal) * excess;
+          let newVal = current - adjustment;
+          newVal = Math.max(0, Math.min(10, newVal));
+          s.slider.value = newVal.toFixed(2);
+        }
+      }
+    }
+
+    function updateAllSliderValues() {
+      const count = sliders.length;
+      if (count === 0) return;
+      const equalValue = (10 / count).toFixed(2);
+      sliders.forEach(s => s.slider.value = equalValue);
+      updateSliderDisplays();
+    }
+
+    function updateSliderDisplays() {
+      sliders.forEach(s => {
+        s.display.textContent = parseFloat(s.slider.value).toFixed(1);
+      });
+    }
+
+    function calculateResult() {
+      resultDiv.innerHTML = '';
+      const totalWeightInput = document.getElementById('total-weight');
+      const totalWeight = parseFloat(totalWeightInput.value);
+      if (isNaN(totalWeight) || totalWeight <= 0) {
+        alert('食材の合計重量は正の数で入力してください。');
+        return;
+      }
+      const saltLevelRadio = document.querySelector('input[name="salt-level"]:checked');
+      const saltRatio = parseFloat(saltLevelRadio.value);
+      if (sliders.length === 0) {
+        alert('調味料を1つ以上選択してください。');
+        return;
+      }
+      const targetSalt = totalWeight * saltRatio;
+      const results = sliders.map(s => {
+        const ratio = parseFloat(s.slider.value);
+        const saltConc = seasonings[s.name];
+        const saltAmount = (ratio / 10) * targetSalt;
+        const amount = saltAmount / saltConc;
+        return { name: s.name, amount: amount };
+      });
+      displayResult(results);
+      selectedSeasonings = [];
+      sliders = [];
+      container.innerHTML = '';
+      createSeasoningSelector(0);
+    }
+
+    function displayResult(results) {
+      if (results.length === 0) {
+        resultDiv.innerHTML = '<p>調味料が選択されていません。</p>';
+        return;
+      }
+      let html = '<h4>調味料の使用量</h4><ul>';
+      results.forEach(r => {
+        html += `<li>${r.name}: ${r.amount.toFixed(1)} g</li>`;
+      });
+      html += '</ul>';
+      resultDiv.innerHTML = html;
+    }
+
+    function resetAll() {
+      resultDiv.innerHTML = '';
+      selectedSeasonings = [];
+      sliders = [];
+      container.innerHTML = '';
+      createSeasoningSelector(0);
+    }
+
+    document.getElementById('calc-btn').addEventListener('click', calculateResult);
+    document.getElementById('reset-btn').addEventListener('click', resetAll);
+    createSeasoningSelector(0);
+  </script>
+</body>
+</html>
